@@ -3,6 +3,7 @@ from sklearn.mixture import GaussianMixture
 from sklearn.externals import joblib
 from scipy.io import wavfile
 from functools import reduce
+import numpy as np
 
 MODEL_SPEAKERS = 50
 TOTAL_SPEAKERS = 50
@@ -139,7 +140,6 @@ class SpeakerRecognition:
                     self.spk_mfcc[i][j][k] -= average[k]
 
 
-
 #TBD : Ten fold validation
 def ten_fold():
     #fold_size = 0.1 * self.n
@@ -159,9 +159,7 @@ def ten_fold():
     return average_accuracy
 
 
-
 # Final result is a confusion matrix which represents the accuracy of the fit of the model
-import numpy as np
 if __name__ == '__main__':
 
     SR = SpeakerRecognition()
