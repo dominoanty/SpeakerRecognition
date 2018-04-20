@@ -4,36 +4,15 @@ from sklearn.externals import joblib
 from scipy.io import wavfile
 from functools import reduce
 import numpy as np
-from os import listdir
-from os.path import isfile, join
-import re
 
-DATA_PATH = 'newdata/data'
-
-# Make a list of speakers from the newdata/data folder. The format for the files in the folder is
-# name_1,wav for training and name_2.wav for testing
-
-onlyfiles = [f for f in listdir(DATA_PATH) if isfile(join(DATA_PATH, f))]
-onlyfiles.sort()
-onlyones = []
-for filename in onlyfiles:
-    dups = re.search('[\w]+_2.wav', filename)
-    if dups is None:
-        onlyones.append(''.join(filename.split('_')[0]))
-print(onlyones)
-
-SPEAKERS = onlyones
-TOTAL_SPEAKERS = len(SPEAKERS)
-MODEL_SPEAKERS = len(SPEAKERS)
-
+MODEL_SPEAKERS = 10
+TOTAL_SPEAKERS = 10
 
 class SpeakerRecognition:
 
     #  Create a GMM and UBM model for each speaker. The GMM is modelled after the speaker and UBM for each speaker
     #  is modelled after all the other speakers. Likelihood Ratio test is used to verify speaker
     def setGMMUBM(self, no_components):
-        self.GMM = []
-        self.UBM = []
         for i in range(MODEL_SPEAKERS):
             self.GMM.append(GaussianMixture(n_components= no_components, covariance_type= 'diag'))
             self.UBM.append(GaussianMixture(n_components= no_components, covariance_type= 'diag'))
@@ -41,31 +20,19 @@ class SpeakerRecognition:
     # Load in data from .wav files in data/
     # Extract mfcc (first 13 coefficients) from each audio sample
     def load_data(self):
-
-
-        self.spk  = [wavfile.read(DATA_PATH + '/' + i + '_1.wav') for i in SPEAKERS]
+        self.spk  = [wavfile.read('data/english' + str(i) + '.wav') for i in range(1, TOTAL_SPEAKERS)]
+        self.spk.append(wavfile.read('data/train.wav'))
         self.spk_mfcc = [psf.mfcc(self.spk[i][1], self.spk[i][0])  for i in range(0, TOTAL_SPEAKERS)]
 
-        self.p_spk = [wavfile.read(DATA_PATH + '/' + i + '_2.wav') for i in SPEAKERS]
-        self.p_spk_mfcc = [psf.mfcc(self.p_spk[i][1], self.p_spk[i][0]) for i in range(0, TOTAL_SPEAKERS)]
-
         for i in range(TOTAL_SPEAKERS):
-            self.spk_train_size.append(len(self.spk_mfcc[i]))
+            self.spk_train_size.append(int(0.9 * len(self.spk_mfcc[i])))
             self.spk_start.append(len(self.total_mfcc))
             print(i)
-            for mfcc in self.spk_mfcc[i]:
+            for mfcc in self.spk_mfcc[i][0:self.spk_train_size[i], :]:
                 self.total_mfcc.append(mfcc)
                 self.speaker_label.append(i)
             self.spk_end.append(len(self.total_mfcc))
 
-        for i in range(TOTAL_SPEAKERS):
-            self.spk_test_size.append(len(self.p_spk_mfcc[i]))
-            self.spk_start.append(len(self.p_total_mfcc))
-            print(i)
-            for mfcc in self.p_spk_mfcc[i]:
-                self.p_total_mfcc.append(mfcc)
-                self.p_speaker_label.append(i)
-            self.p_spk_end.append(len(self.p_total_mfcc))
 
 
     # Gaussian Mixture Model is made of a number of Gaussian distribution components.
@@ -75,10 +42,9 @@ class SpeakerRecognition:
     def find_best_params(self):
         best_no_components = 1
         maxacc = 0
-        for i in range(100, 256):
+        for i in range(1, 256):
             self.setGMMUBM(i)
-            self.fit_model()
-            _, acc, _ = self.predict()
+            acc, _ = self.execute()
             print("Accuracy for n = {} is {}".format(i, acc))
             if acc > maxacc:
                 maxacc = acc
@@ -92,8 +58,8 @@ class SpeakerRecognition:
             self.GMM[i].fit(self.spk_mfcc[i])
             self.UBM[i].fit(self.total_mfcc[:self.spk_start[i]] + self.total_mfcc[self.spk_end[i]:])
             print("Fit end for {}".format(i))
-            joblib.dump(self.UBM[i], 'dumps/new/ubm' + str(i) + '.pkl')
-            joblib.dump(self.GMM[i], 'dumps/new/gmm' + str(i) + '.pkl')
+            joblib.dump(self.UBM[i], 'dumps/ubm' + str(i) + '.pkl')
+            joblib.dump(self.GMM[i], 'dumps/gmm' + str(i) + '.pkl')
 
     def model(self, no_components = 244):
         self.setGMMUBM(no_components)
@@ -102,8 +68,8 @@ class SpeakerRecognition:
     # Predict the output for each model for each speaker and produce confusion matrix
     def load_model(self):
         for i in range(0, MODEL_SPEAKERS):
-            self.GMM.append(joblib.load('dumps/new/gmm' + str(i) + '.pkl'))
-            self.UBM.append(joblib.load('dumps/new/ubm' + str(i) + '.pkl'))
+            self.GMM.append(joblib.load('dumps/gmm' + str(i) + '.pkl'))
+            self.UBM.append(joblib.load('dumps/ubm' + str(i) + '.pkl'))
 
     def predict(self):
         avg_accuracy = 0
@@ -112,7 +78,7 @@ class SpeakerRecognition:
 
         for i in range(TOTAL_SPEAKERS):
             for j in range(MODEL_SPEAKERS):
-                x = self.GMM[j].score_samples(self.p_spk_mfcc[i]) - self.UBM[j].score_samples(self.p_spk_mfcc[i])
+                x = self.GMM[j].score_samples(self.spk_mfcc[i][self.spk_train_size[i] + 2 : ]) - self.UBM[j].score_samples(self.spk_mfcc[i][self.spk_train_size[i] + 2 : ])
                 for score in x :
                     if score > 0:
                         confusion[i][j] += 1
@@ -132,7 +98,7 @@ class SpeakerRecognition:
         spk_accuracy = 0
         for i in range(MODEL_SPEAKERS):
             best_guess, _ = max(enumerate(confusion[i]), key=lambda p: p[1])
-            print("For speaker {}, best guess is {}".format(SPEAKERS[i], SPEAKERS[best_guess]))
+            print("For speaker {}, best guess is {}".format(i, best_guess))
             if i == best_guess:
                 spk_accuracy += 1
         spk_accuracy /= MODEL_SPEAKERS
@@ -148,9 +114,6 @@ class SpeakerRecognition:
         self.spk = []
         self.spk_mfcc = []
 
-        self.p_spk = []
-        self.p_spk_mfcc = []
-
         # Holds all the training mfccs of all speakers and
         # speaker_label is the speaker label for the corresponding mfcc
 
@@ -158,17 +121,10 @@ class SpeakerRecognition:
         self.speaker_label = []
         self.spk_train_size = []  # Index upto which is training data for that speaker.
 
-        self.p_total_mfcc = []
-        self.p_speaker_label = []
-        self.spk_test_size = []
-
         # Since the length of all the audio files are different, spk_start and spk_end hold
 
         self.spk_start = []
         self.spk_end = []
-
-        self.p_spk_start = []
-        self.p_spk_end = []
 
         self.GMM = []
         self.UBM = []
@@ -183,12 +139,6 @@ class SpeakerRecognition:
             for j, feature_vector in enumerate(speaker_mfcc):
                 for k, feature in enumerate(feature_vector):
                     self.spk_mfcc[i][j][k] -= average[k]
-        for i, speaker_mfcc in enumerate(self.p_spk_mfcc):
-            average = reduce(lambda acc, ele: acc + ele, speaker_mfcc)
-            average = list(map(lambda x: x / len(speaker_mfcc), average))
-            for j, feature_vector in enumerate(speaker_mfcc):
-                for k, feature in enumerate(feature_vector):
-                    self.p_spk_mfcc[i][j][k] -= average[k]
 
 
 #TBD : Ten fold validation
@@ -214,10 +164,9 @@ def ten_fold():
 if __name__ == '__main__':
 
     SR = SpeakerRecognition()
-    #SR.load_model()
-    SR.setGMMUBM(no_components=13)
-    #SR.find_best_params()
-    SR.fit_model()
+    SR.load_model()
+    #SR.setGMMUBM(no_components=244)
+    #SR.fit_model()
     confusion, mfcc_accuracy, spk_accuracy = SR.predict()
 
     print("Confusion Matrix")
